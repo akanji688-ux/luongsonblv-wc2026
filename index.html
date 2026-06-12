@@ -663,6 +663,7 @@ var MATCHES=[
 // ===== TODAY MATCHES (auto-updated by ESPN) =====
 var TODAY_MATCHES=[];
 var ALL_MATCHES=[];
+var WC_ESPN=[];  // WC 2026 live data from ESPN fifa.world
 var currentDate='12/06';
 var currentLeague='World Cup 2026';
 var liveTimer=null,countdownTimer=null,nextRefreshAt=null,isRefreshing=false;
@@ -835,6 +836,87 @@ function selectDate(d){
   if(lt&&!lt.classList.contains('act'))showTab('lich');
 }
 
+// ===== ESPN → VN name mapping =====
+var ESPN_TO_VN={
+  'South Africa':'Nam Phi','South Korea':'Hàn Quốc','North Korea':'Triều Tiên',
+  'Czech Republic':'CH Séc','Czechia':'CH Séc',
+  'Bosnia and Herzegovina':'Bosnia','Bosnia-Herzegovina':'Bosnia',
+  'United States':'Mỹ','USA':'Mỹ',
+  'Australia':'Úc','Turkey':'Thổ Nhĩ Kỳ','Germany':'Đức',
+  'Ivory Coast':'Bờ Biển Ngà',"Cote d'Ivoire":'Bờ Biển Ngà',
+  'Netherlands':'Hà Lan','Japan':'Nhật Bản','Sweden':'Thụy Điển',
+  'Belgium':'Bỉ','Egypt':'Ai Cập','Spain':'Tây Ban Nha',
+  'France':'Pháp','Norway':'Na Uy','Austria':'Áo',
+  'Portugal':'Bồ Đào Nha','DR Congo':'CHDC Congo','Congo, DR':'CHDC Congo',
+  'England':'Anh','Morocco':'Marocco','Switzerland':'Thụy Sĩ',
+  'Vietnam':'Việt Nam','Cape Verde':'Cabo Verde',
+  'Scotland':'Scotland'
+};
+function espnToVN(n){return ESPN_TO_VN[n]||n;}
+
+// ===== ESPN DATA LOOKUP by team names (searches WC_ESPN first) =====
+function getESPNData(name1, name2){
+  var pools=[WC_ESPN,TODAY_MATCHES];
+  for(var p=0;p<pools.length;p++){
+    var pool=pools[p];
+    for(var i=0;i<pool.length;i++){
+      var em=pool[i];
+      var en1=espnToVN(parseTeam(em.d1).name),en2=espnToVN(parseTeam(em.d2).name);
+      if((en1===name1&&en2===name2)||(en1===name2&&en2===name1))return em;
+    }
+  }
+  return null;
+}
+
+// ===== WC 2026 ESPN FETCH =====
+function fetchWC2026(){
+  var now=new Date();
+  var dates=[];
+  // Fetch today and yesterday (VN is UTC+7, so an early-morning VN match may be previous UTC day)
+  for(var d=-1;d<=1;d++){
+    var dt=new Date(now.getTime()+d*86400000);
+    var s=dt.getUTCFullYear()+String(dt.getUTCMonth()+1).padStart(2,'0')+String(dt.getUTCDate()).padStart(2,'0');
+    dates.push(s);
+  }
+  var fetched=0,all=[];
+  dates.forEach(function(dateStr){
+    fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates='+dateStr)
+      .then(function(r){return r.json();})
+      .then(function(data){
+        (data.events||[]).forEach(function(ev){
+          try{
+            var comp=ev.competitions[0],comps=comp.competitors||[];
+            var home=comps.filter(function(c){return c.homeAway==='home';})[0]||comps[0];
+            var away=comps.filter(function(c){return c.homeAway==='away';})[0]||comps[1];
+            if(!home||!away)return;
+            var st=comp.status.type;
+            var status=st.completed?'done':(st.name==='STATUS_IN_PROGRESS'?'live':'upcoming');
+            var score=(status!=='upcoming')?(home.score||'0')+' - '+(away.score||'0'):null;
+            var clock='';try{clock=comp.status.displayClock||'';}catch(e){}
+            all.push({
+              id:'wc_'+ev.id,
+              d1:'🏆 '+home.team.displayName,
+              d2:'🏆 '+away.team.displayName,
+              score:score,status:status,clock:clock
+            });
+          }catch(e){}
+        });
+      })
+      .catch(function(){})
+      .finally(function(){
+        fetched++;
+        if(fetched>=dates.length&&all.length>0){
+          WC_ESPN=all;
+          // Refresh visible UI
+          buildFeaturedCards();
+          var lt=document.getElementById('tab-lich');
+          if(lt&&lt.classList.contains('act'))renderLich();
+          renderGroups();
+        }
+      });
+  });
+}
+
 // ===== RENDER LICH (WC 2026 only, by date) =====
 function renderLich(){
   var pool=MATCHES.filter(function(m){
@@ -846,7 +928,6 @@ function renderLich(){
   }
   var DAY=['CN','T2','T3','T4','T5','T6','T7'];
   var p=currentDate.split('/'),dt=new Date(2026,+p[1]-1,+p[0]);
-  var dateTitle=DAY[dt.getDay()]+', '+p[0]+'/'+p[1]+'/2026';
   var html='<div class="round-group"><div class="date-header">'
     +'<span class="dh-day">World Cup 2026</span>'
     +' '
@@ -854,12 +935,16 @@ function renderLich(){
   pool.sort(function(a,b){return a.t.localeCompare(b.t);});
   pool.forEach(function(m){
     var t1=parseTeam(m.d1),t2=parseTeam(m.d2);
-    var sc=m.score||'vs',scCls=(m.status==='live')?'score live-s':'score';
+    // Overlay ESPN live data
+    var espn=getESPNData(t1.name,t2.name);
+    var status=espn?espn.status:(m.status||'upcoming');
+    var sc=(espn&&espn.score)?espn.score:(m.score||'vs');
+    var clockTxt=espn?(espn.clock||''):(m.clock||'');
+    var scCls=(status==='live')?'score live-s':'score';
     var c1=makeCrest(t1.name,t1.flag,'sm'),c2=makeCrest(t2.name,t2.flag,'sm');
-    var clockTxt=m.clock?m.clock:'';
     var badge='';
-    if(m.status==='live')badge='<span style="background:#CC0000;color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:3px;letter-spacing:1px;animation:blink .8s infinite">⏱ '+(clockTxt||'LIVE')+'</span>';
-    else if(m.status==='done')badge='<span style="font-size:10px;color:#555;">FT</span>';
+    if(status==='live')badge='<span style="background:#CC0000;color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:3px;letter-spacing:1px;animation:blink .8s infinite">⏱ '+(clockTxt||'LIVE')+'</span>';
+    else if(status==='done')badge='<span style="font-size:10px;color:#555;">FT</span>';
     html+='<div class="match-row">'
       +'<div class="match-dt"><div class="mtime">'+m.t+'</div><div class="mgrp" style="margin-top:4px;">'+badge+'</div></div>'
       +'<div class="team-home"><span class="t-name">'+t1.name+'</span>'+c1+'</div>'
@@ -924,20 +1009,32 @@ function buildFeaturedCards(){
   var grid=document.getElementById('featuredCards');
   if(!grid) return;
 
-  // Only use matches from today/tomorrow (filter stale data)
   var todayD=new Date();
   var todayS=String(todayD.getDate()).padStart(2,'0')+'/'+String(todayD.getMonth()+1).padStart(2,'0');
   var tmrD=new Date(todayD.getTime()+86400000);
   var tmrS=String(tmrD.getDate()).padStart(2,'0')+'/'+String(tmrD.getMonth()+1).padStart(2,'0');
   function isRecent(m){return !m.d||(m.d===todayS||m.d===tmrS);}
   function isWC(m){var id=String(m.id);return !id.startsWith('bd_')&&!id.startsWith('e_');}
-  var live   = ALL_MATCHES.filter(function(m){return m.status==='live'&&isRecent(m)&&isWC(m);});
-  var done   = ALL_MATCHES.filter(function(m){return m.status==='done'&&isRecent(m)&&isWC(m);})
-               .sort(function(a,b){return b.t.localeCompare(a.t);});
-  var upcoming= ALL_MATCHES.filter(function(m){return m.status==='upcoming'&&isRecent(m)&&isWC(m);});
-  var wc     = MATCHES.filter(function(m){return !isFake(m);});
 
-  // Pick 3 best cards - no duplicates
+  // For each WC static match overlay real ESPN status/score
+  function enrichWC(m){
+    var t1=parseTeam(m.d1),t2=parseTeam(m.d2);
+    var espn=getESPNData(t1.name,t2.name);
+    if(!espn)return m;
+    return Object.assign({},m,{status:espn.status,score:espn.score,clock:espn.clock});
+  }
+
+  // LIVE first, then upcoming — NEVER done
+  var live    = ALL_MATCHES.filter(function(m){return m.status==='live'&&isRecent(m)&&isWC(m);});
+  var upcoming= ALL_MATCHES.filter(function(m){return m.status==='upcoming'&&isRecent(m)&&isWC(m);});
+  // WC static matches enriched, exclude done
+  var wc = MATCHES.filter(function(m){
+    if(isFake(m))return false;
+    var em=enrichWC(m);
+    return em.status!=='done';
+  }).map(enrichWC);
+
+  // Pick 4 cards — no done, no duplicates
   var used={};
   function pick(arr){
     for(var i=0;i<arr.length;i++){
@@ -945,15 +1042,16 @@ function buildFeaturedCards(){
     }return null;
   }
 
-  var c1=pick(live)||pick(done)||pick(wc);
+  var c1=pick(live)||pick(upcoming)||pick(wc);
   var c2=pick(live)||pick(upcoming)||pick(wc);
-  var c3=pick(done)||pick(live)||pick(wc);
+  var c3=pick(live)||pick(upcoming)||pick(wc);
+  var c4=pick(live)||pick(upcoming)||pick(wc);
 
   function rc(m){
     if(!m)return '<div class="fc-card is-soon" style="opacity:.3;min-height:200px;display:flex;align-items:center;justify-content:center;"><span style="color:#555;">Không có trận</span></div>';
     var t1=parseTeam(m.d1),t2=parseTeam(m.d2);
     var isLive=m.status==='live',isDone=m.status==='done';
-    var lg=getLeague(m),ch=m.ch||'LuongsonTV';
+    var lg=getLeague(m),ch=m.ch||'Socolive';
     var sc=m.score||(isLive?'- -':'VS');
     var clk=m.clock||'';
     var bg1=m.bg1||(TEAM_BG[t1.name]||'#003087');
@@ -1001,24 +1099,47 @@ function buildFeaturedCards(){
         +'<div style="font-size:12px;font-weight:600;color:var(--wc-green);">'+m.d+' · '+m.t+'</div>'
       +'</div></div></div>';
   }
-  grid.innerHTML=rc(c1)+rc(c2)+rc(c3);
+  grid.innerHTML=rc(c1)+rc(c2)+rc(c3)+rc(c4);
 }
 
 // ===== GROUP CAROUSEL =====
+function calcGroupStats(k){
+  var g=GROUPS[k];
+  var stats={};
+  g.teams.forEach(function(t){stats[t.n]={t:0,w:0,d:0,l:0,pts:0};});
+  var grpMs=MATCHES.filter(function(m){return m.b===k&&!isFake(m);});
+  grpMs.forEach(function(m){
+    var t1=parseTeam(m.d1).name,t2=parseTeam(m.d2).name;
+    var espn=getESPNData(t1,t2);
+    if(!espn||!espn.score||espn.status==='upcoming')return;
+    var pts=espn.score.split(' - '),g1=parseInt(pts[0]),g2=parseInt(pts[1]);
+    if(isNaN(g1)||isNaN(g2))return;
+    if(stats[t1])stats[t1].t++;
+    if(stats[t2])stats[t2].t++;
+    if(g1>g2){if(stats[t1]){stats[t1].w++;stats[t1].pts+=3;}if(stats[t2])stats[t2].l++;}
+    else if(g1<g2){if(stats[t2]){stats[t2].w++;stats[t2].pts+=3;}if(stats[t1])stats[t1].l++;}
+    else{if(stats[t1]){stats[t1].d++;stats[t1].pts++;}if(stats[t2]){stats[t2].d++;stats[t2].pts++;}}
+  });
+  return stats;
+}
+
 function renderGroups(){
   var carousel=document.getElementById('groupCarousel');if(!carousel)return;
   addDragScroll('groupCarousel');
   var html='';
   Object.keys(GROUPS).forEach(function(k){
     var g=GROUPS[k];
+    var stats=calcGroupStats(k);
+    var sorted=g.teams.slice().sort(function(a,b){return (stats[b.n]||{pts:0}).pts-(stats[a.n]||{pts:0}).pts;});
     html+='<div class="grp-card" id="gc-'+k+'" onclick="showGroupDetail(\''+k+'\')">'
       +'<div class="grp-card-hd"><span class="gname">BẢNG '+k+'</span><span class="gpts">Điểm</span></div>'
-      +g.teams.map(function(t,i){
+      +sorted.map(function(t,i){
         var logo=getTeamLogoUrl(t.n);
         var li=logo?'<img src="'+logo+'" style="width:24px;height:24px;object-fit:contain;flex-shrink:0;border-radius:4px;" onerror="this.outerHTML=\'<span style=&quot;font-size:18px;&quot;>'+t.f+'</span>\'">'
           :'<span style="font-size:18px;">'+t.f+'</span>';
+        var pts=(stats[t.n]||{pts:0}).pts;
         return '<div class="grp-row'+(i<2?' qualify':'')+'">'
-          +li+'<span class="gteam">'+t.n+'</span><span class="gpts-val">0</span></div>';
+          +li+'<span class="gteam">'+t.n+'</span><span class="gpts-val">'+pts+'</span></div>';
       }).join('')
       +'</div>';
   });
@@ -1032,18 +1153,21 @@ function showGroupDetail(k){
   var card=document.getElementById('gc-'+k);
   if(card)card.classList.add('selected');
 
-  // BXH rows
-  var bxhRows=g.teams.map(function(t,i){
+  // BXH rows — with real stats from ESPN
+  var stats=calcGroupStats(k);
+  var sortedTeams=g.teams.slice().sort(function(a,b){return (stats[b.n]||{pts:0}).pts-(stats[a.n]||{pts:0}).pts;});
+  var bxhRows=sortedTeams.map(function(t,i){
     var logo=getTeamLogoUrl(t.n);
     var li=logo?'<img src="'+logo+'" alt="'+t.n+'" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.outerHTML=\'<span style=&quot;font-size:18px;&quot;>'+t.f+'</span>\'">'
       :'<span style="font-size:20px;flex-shrink:0;">'+t.f+'</span>';
+    var s=stats[t.n]||{t:0,w:0,d:0,l:0,pts:0};
     return '<tr style="'+(i<2?'border-left:3px solid #fff;':'')+'">'
       +'<td style="padding:10px 10px 10px 14px;"><div style="display:flex;align-items:center;gap:9px;">'+li+'<span style="font-size:13px;font-weight:600;color:#ddd;">'+t.n+'</span></div></td>'
-      +'<td style="text-align:center;color:#999;font-size:12px;">0</td>'
-      +'<td style="text-align:center;color:#999;font-size:12px;">0</td>'
-      +'<td style="text-align:center;color:#999;font-size:12px;">0</td>'
-      +'<td style="text-align:center;color:#999;font-size:12px;">0</td>'
-      +'<td style="text-align:center;font-family:Oswald,sans-serif;font-size:16px;font-weight:700;color:var(--gold);padding-right:14px;">0</td>'
+      +'<td style="text-align:center;color:#999;font-size:12px;">'+s.t+'</td>'
+      +'<td style="text-align:center;color:#999;font-size:12px;">'+s.w+'</td>'
+      +'<td style="text-align:center;color:#999;font-size:12px;">'+s.d+'</td>'
+      +'<td style="text-align:center;color:#999;font-size:12px;">'+s.l+'</td>'
+      +'<td style="text-align:center;font-family:Oswald,sans-serif;font-size:16px;font-weight:700;color:var(--gold);padding-right:14px;">'+s.pts+'</td>'
       +'</tr>';
   }).join('');
 
@@ -1059,20 +1183,23 @@ function showGroupDetail(k){
     +'<th style="text-align:center;padding:6px 14px 6px 4px;font-size:10px;color:var(--gold);">PTS</th>'
     +'</tr></thead><tbody>'+bxhRows+'</tbody></table>';
 
-  // Match rows
+  // Match rows — overlay ESPN data for live/done
   var FAKE=['Thắng','Thua','Nhất Bảng','Á quân','Hạng 3'];
   var grpMs=MATCHES.filter(function(m){return m.b===k&&!FAKE.some(function(f){return m.d1.indexOf(f)>-1||m.d2.indexOf(f)>-1;});});
   var matchRows=grpMs.map(function(m){
     var t1=parseTeam(m.d1),t2=parseTeam(m.d2);
-    var hasScore=!!m.score,isLive=m.status==='live';
+    var espn=getESPNData(t1.name,t2.name);
+    var status=espn?espn.status:(m.status||'upcoming');
+    var score=espn?espn.score:m.score;
+    var isLive=status==='live',isDone=status==='done',hasScore=!!score;
     var actBtn=isLive
-      ?'<a href="https://antlive210.com/" target="_blank" data-ga="btn_bangdau_xem_tt" style="display:inline-flex;align-items:center;gap:5px;background:#CC0000;border:1px solid #FFD700;border-radius:6px;padding:4px 8px;text-decoration:none;">'
-        +'<img src="image/luongsontv-banner.png" style="height:26px;width:auto;object-fit:contain;">'
+      ?'<a href="https://socolive.tv/" target="_blank" style="display:inline-flex;align-items:center;gap:5px;background:#CC0000;border:1px solid #FFD700;border-radius:6px;padding:4px 8px;text-decoration:none;">'
+        +'<img src="image/socolive-logo-2025.webp" style="height:26px;width:auto;object-fit:contain;">'
         +'<span style="font-size:11px;font-weight:800;color:#FFD700;white-space:nowrap;">▶ Xem TT</span></a>'
       :(hasScore
-        ?'<span style="font-family:Oswald,sans-serif;font-size:16px;font-weight:700;color:#fff;background:rgba(255,255,255,.08);padding:4px 12px;border-radius:5px;letter-spacing:2px;">'+m.score+'</span>'
-        :'<a href="https://antlive210.com/" target="_blank" data-ga="btn_bangdau_xem_tt" style="display:inline-flex;align-items:center;gap:5px;background:#CC0000;border:1px solid #FFD700;border-radius:6px;padding:4px 8px;text-decoration:none;">'
-          +'<img src="image/luongsontv-banner.png" style="height:26px;width:auto;object-fit:contain;">'
+        ?'<span style="font-family:Oswald,sans-serif;font-size:16px;font-weight:700;color:#fff;background:rgba(255,255,255,.08);padding:4px 12px;border-radius:5px;letter-spacing:2px;">'+score+'</span>'
+        :'<a href="https://socolive.tv/" target="_blank" style="display:inline-flex;align-items:center;gap:5px;background:#CC0000;border:1px solid #FFD700;border-radius:6px;padding:4px 8px;text-decoration:none;">'
+          +'<img src="image/socolive-logo-2025.webp" style="height:26px;width:auto;object-fit:contain;">'
           +'<span style="font-size:11px;font-weight:800;color:#FFD700;white-space:nowrap;">▶ Xem TT</span></a>');
     var c1=makeCrest(t1.name,t1.flag,'sm'),c2=makeCrest(t2.name,t2.flag,'sm');
     return '<tr style="border-bottom:1px solid rgba(255,255,255,.04);">'
@@ -1121,7 +1248,7 @@ var FEATURED_UPCOMING = [
     id:'hot1', league:'Ngoại Hạng Anh - Vòng 37',
     d:'19/05', t:'02:00',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Arsenal', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Burnley',
-    score:'1 - 0', status:'done', ch:'LuongsonTV',
+    score:'1 - 0', status:'done', ch:'Socolive',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/359.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/379.png',
     bg1:'linear-gradient(135deg,#EF0107,#063672)',
@@ -1131,7 +1258,7 @@ var FEATURED_UPCOMING = [
     id:'hot2', league:'Ngoại Hạng Anh - Vòng 37',
     d:'20/05', t:'01:30',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Bournemouth', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Man City',
-    score:null, status:'upcoming', ch:'LuongsonTV',
+    score:null, status:'upcoming', ch:'Socolive',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/349.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/382.png',
     bg1:'linear-gradient(135deg,#DA291C,#000)',
@@ -1141,7 +1268,7 @@ var FEATURED_UPCOMING = [
     id:'hot3', league:'Ngoại Hạng Anh - Vòng 37',
     d:'20/05', t:'02:15',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Chelsea', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Tottenham',
-    score:null, status:'upcoming', ch:'LuongsonTV',
+    score:null, status:'upcoming', ch:'Socolive',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/363.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/367.png',
     bg1:'linear-gradient(135deg,#034694,#1E90FF)',
@@ -1209,7 +1336,7 @@ function parseBD24H(htmlText){
       results.push({
         id:'bd_'+idx,r:'today',league:'Bóng Đá',d:d,t:t,
         d1:'⚽ '+teamImgs[0].name,d2:'⚽ '+teamImgs[1].name,
-        score:score,status:status,ch:'LuongsonTV',
+        score:score,status:status,ch:'Socolive',
         logo1:teamImgs[0].src,logo2:teamImgs[1].src
       });
     }catch(e){}
@@ -1237,7 +1364,6 @@ function fetchBD24H(){
     .catch(function(){bdRefreshing=false;});
   setTimeout(function(){bdRefreshing=false;},10000);
 }
-
 
 // ===== BLV CARDS (load from blv-api) =====
 (function(){
