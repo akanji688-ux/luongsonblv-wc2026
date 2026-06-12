@@ -1051,7 +1051,7 @@ function buildFeaturedCards(){
     if(!m)return '<div class="fc-card is-soon" style="opacity:.3;min-height:200px;display:flex;align-items:center;justify-content:center;"><span style="color:#555;">Không có trận</span></div>';
     var t1=parseTeam(m.d1),t2=parseTeam(m.d2);
     var isLive=m.status==='live',isDone=m.status==='done';
-    var lg=getLeague(m),ch=m.ch||'Socolive';
+    var lg=getLeague(m),ch=m.ch||'LuongsonTV';
     var sc=m.score||(isLive?'- -':'VS');
     var clk=m.clock||'';
     var bg1=m.bg1||(TEAM_BG[t1.name]||'#003087');
@@ -1248,7 +1248,7 @@ var FEATURED_UPCOMING = [
     id:'hot1', league:'Ngoại Hạng Anh - Vòng 37',
     d:'19/05', t:'02:00',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Arsenal', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Burnley',
-    score:'1 - 0', status:'done', ch:'Socolive',
+    score:'1 - 0', status:'done', ch:'LuongsonTV',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/359.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/379.png',
     bg1:'linear-gradient(135deg,#EF0107,#063672)',
@@ -1258,7 +1258,7 @@ var FEATURED_UPCOMING = [
     id:'hot2', league:'Ngoại Hạng Anh - Vòng 37',
     d:'20/05', t:'01:30',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Bournemouth', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Man City',
-    score:null, status:'upcoming', ch:'Socolive',
+    score:null, status:'upcoming', ch:'LuongsonTV',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/349.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/382.png',
     bg1:'linear-gradient(135deg,#DA291C,#000)',
@@ -1268,7 +1268,7 @@ var FEATURED_UPCOMING = [
     id:'hot3', league:'Ngoại Hạng Anh - Vòng 37',
     d:'20/05', t:'02:15',
     d1:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Chelsea', d2:'🏴󠁧󠁢󠁥󠁮󠁧󠁿 Tottenham',
-    score:null, status:'upcoming', ch:'Socolive',
+    score:null, status:'upcoming', ch:'LuongsonTV',
     logo1:'https://a.espncdn.com/i/teamlogos/soccer/500/363.png',
     logo2:'https://a.espncdn.com/i/teamlogos/soccer/500/367.png',
     bg1:'linear-gradient(135deg,#034694,#1E90FF)',
@@ -1336,7 +1336,7 @@ function parseBD24H(htmlText){
       results.push({
         id:'bd_'+idx,r:'today',league:'Bóng Đá',d:d,t:t,
         d1:'⚽ '+teamImgs[0].name,d2:'⚽ '+teamImgs[1].name,
-        score:score,status:status,ch:'Socolive',
+        score:score,status:status,ch:'LuongsonTV',
         logo1:teamImgs[0].src,logo2:teamImgs[1].src
       });
     }catch(e){}
@@ -1457,6 +1457,8 @@ ALL_MATCHES=MATCHES.filter(function(m){return !isFake(m);});
 currentDate='12/06';currentLeague='World Cup 2026';
 buildFeaturedCards();
 setTimeout(function(){fetchBD24H();},100);
+setTimeout(function(){fetchWC2026();},200);
+setInterval(function(){fetchWC2026();},60000);
 addDragScroll('liveCards');
 addDragScroll('featuredCards');
 addDragScroll('dateNav');
